@@ -12,7 +12,9 @@ import FirebaseAuth
 
 
 struct LoginDomain: Reducer {
-    struct State: Equatable {
+    struct State : Equatable {
+        var ninePlay : NinePlayDomain.State
+        var path = StackState<Path.State>()
         var count = 0
         var username = ""
         var password = ""
@@ -21,62 +23,113 @@ struct LoginDomain: Reducer {
         var fact: String?
         var isLoading = false
         var authRes: String?
-        var user: User?
+        var loggedIn = Auth.auth().currentUser != nil
+        
+        
+    
+        
       }
 
-      enum Action {
+    enum Action : Equatable{
+        case path(StackAction<Path.State, Path.Action>)
         case passwordChanged(String)
         case loginButtonTapped
         case usernameChanged(String)
         case authResponse(User)
         case authError(NSError)
+        case playAction(NinePlayDomain.Action)
+        
+        
         
       }
 
-      func reduce(into state: inout State, action: Action) -> Effect<Action> {
-        switch action {
-        case .passwordChanged(let password):
-          state.password = password
-          return .none
-            
-        case let .usernameChanged(username):
-            state.username = username
-            return .none
-            
-        case .loginButtonTapped:
-            state.fact = nil
-            state.isLoading = true
-            return .run { [username = state.username, password = state.password] send in
-                Task.init {
-                    do {
-                        let authResult = try await Auth.auth().signIn(withEmail: username, password: password)
-                        await send(.authResponse(authResult.user))
-                    } catch {
-                        // Handle authentication error here
-                        await send(.authError(error as NSError))
-                    }
-                }
+    var body: some ReducerOf<Self> {
+        Scope(state: \.ninePlay, action: /LoginDomain.Action.playAction) {
+              NinePlayDomain()
             }
+        Reduce { state, action in
+              switch action{
+              case .path:
+                  return .none
+              case .passwordChanged(let password):
+                state.password = password
+                return .none
+                  
+              case let .usernameChanged(username):
+                  state.username = username
+                  return .none
+                  
+              case .loginButtonTapped:
+                  state.fact = nil
+                  state.isLoading = true
+                  return .run { [username = state.username, password = state.password] send in
+                      Task.init {
+                          do {
+                              let authResult = try await Auth.auth().signIn(withEmail: username, password: password)
+                              await send(.authResponse(authResult.user))
+                          } catch {
+                              // Handle authentication error here
+                              await send(.authError(error as NSError))
+                          }
+                      }
+                  }
 
-                
-        case let .authError(err):
-            print("FAILED AUTH",err)
-            if(err.code==AuthErrorCode.invalidEmail.rawValue){
-                print("bad email")
-                state.usError = true
-                
-            }
-            if(err.code==AuthErrorCode.weakPassword.rawValue){
-                print("weak pass")
-                state.pwdError = true
-                
-            }
-            return .none
+                      
+              case let .authError(err):
+                  print("FAILED AUTH",err)
+                  if(err.code==AuthErrorCode.invalidEmail.rawValue){
+                      print("bad email")
+                      state.usError = true
+                      
+                  }
+                  if(err.code==AuthErrorCode.weakPassword.rawValue){
+                      print("weak pass")
+                      state.pwdError = true
+                      
+                  }
+                  return .none
+                  
+              case let .authResponse(user):
+                    //state.user = user
+                  state.loggedIn = true
+                    state.isLoading = false
+                    return .none
+              case .playAction(let action):
+                  if(action == NinePlayDomain.Action.logoutSuccess){
+                      //state.user = Auth.auth().currentUser
+                      
+                      state.loggedIn = false
+                  }
+                  return .none
+              }
+        }
+        
+      .forEach(\.path, action: /Action.path) {
+          Path()
+      }
+    }
+    struct Path: Reducer {
+        enum State : Equatable{
+
+          case signup(SignUpDomain.State)
+            case loggedIn(NinePlayDomain.State)
             
-        case let .authResponse(user):
-              state.user = user
-              state.isLoading = false
-              return .none
+          
+        }
+        enum Action :Equatable {
+          
+          case signup(SignUpDomain.Action)
+            case loggedIn(NinePlayDomain.Action)
+            
+          
+        }
+        var body: some ReducerOf<Self> {
+          Scope(state: /State.signup, action: /Action.signup) {
+            SignUpDomain()
+          }
+            Scope(state: /State.loggedIn, action: /Action.loggedIn) {
+              NinePlayDomain()
+            }
 
         }
       }
@@ -87,59 +140,119 @@ struct LoginDomain: Reducer {
 
 struct LoginView: View {
     let store: StoreOf<LoginDomain>
-    init(store: StoreOf<LoginDomain>) {
-            self.store = store
-            // Set the navigation bar's tint color to a contrasting color
-            UINavigationBar.appearance().tintColor = .red
-        }
+    
     var body: some View {
-        WithViewStore(self.store, observe: { $0 }) { viewStore in
-            
-            ZStack {
-                Color.blue
-                    .ignoresSafeArea()
-                Circle()
-                    .scale(1.7)
-                    .foregroundColor(.white.opacity(0.15))
-                Circle()
-                    .scale(1.35)
-                    .foregroundColor(.white)
+        
+        NavigationStackStore(self.store.scope(state: \.path, action: { .path($0) })) {
+            WithViewStore(self.store, observe: { $0 }) { viewStore in
+                if(viewStore.loggedIn){
+                    NinePlayView.init(store: self.store.scope(state: \.ninePlay, action: LoginDomain.Action.playAction))
+                }
+                else{
                 
-                VStack {
-                    Text("Login")
-                        .font(.largeTitle)
-                        .bold()
-                        .padding()
-                    
-                    TextField("Username", text: viewStore.binding<String>(get: \.username, send: { .usernameChanged($0) }))
-                        .padding()
-                        .frame(width: 300, height: 50)
-                        .background(Color.black.opacity(0.05))
-                        .cornerRadius(10)
-                        .border(viewStore.usError ? .red:.black)
                     
                     
-                    SecureField("Password", text: viewStore.binding<String>(get: \.password, send: {.passwordChanged($0)}))
-                        .padding()
-                        .frame(width: 300, height: 50)
-                        .background(Color.black.opacity(0.05))
-                        .cornerRadius(10)
-                        .border(viewStore.pwdError ? .red:.black)
-                    
-                    Button("Login") {
-                        viewStore.send(.loginButtonTapped)
+                
+                
+                    ZStack {
+                        
+                        Image("bgLogin") // Set the background image for the entire ZStack
+                            .resizable()
+                            .scaledToFill()
+                            .edgesIgnoringSafeArea(.all)
+                        
+                        
+                        ZStack{
+                            
+                            VStack {
+                                Spacer()
+                                Text("Welcome Back")
+                                    .font(.custom("Silkscreen-Bold", size: 20))
+                                    .bold()
+                                    .padding()
+                                
+                                TextField("Username", text: viewStore.binding<String>(get: \.username, send: { .usernameChanged($0) }))
+                                    .padding()
+                                    .frame(width: 300, height: 50)
+                                    .background(Color.black.opacity(0.05))
+                                    .cornerRadius(10)
+                                    .border(viewStore.usError ? .red:.black)
+                                
+                                
+                                SecureField("Password", text: viewStore.binding<String>(get: \.password, send: {.passwordChanged($0)}))
+                                    .padding()
+                                    .frame(width: 300, height: 50)
+                                    .background(Color.black.opacity(0.05))
+                                    .cornerRadius(10)
+                                    .border(viewStore.pwdError ? .red:.black)
+                                
+                                Button("Login") {
+                                    viewStore.send(.loginButtonTapped)
+                                }
+                                .font(.custom("Silkscreen-Regular", size: 16))
+                                .foregroundColor(.white)
+                                .frame(width: 300, height: 50)
+                                .background(Color.green)
+                                .cornerRadius(10)
+                                HStack{
+                                    VStack{
+                                        Divider()
+                                    }// Horizontal line
+                                    
+                                    Text("or")
+                                        .foregroundColor(.secondary)
+                                    VStack{
+                                        Divider()
+                                    }
+                                }
+                                .frame(width: 300,height: 10)
+                                NavigationLink(state: LoginDomain.Path.State.signup(SignUpDomain.State())){
+                                    Text("Sign Up")
+                                        .font(.custom("Silkscreen-Regular", size: 16))
+                                        .foregroundColor(.black)
+                                        .frame(width: 300, height: 50)
+                                        .background(Color.black.opacity(0.02))
+                                        .border(.black)
+                                        .cornerRadius(3)
+                                }
+                                
+                                
+                                
+                                
+                                
+                                
+                            }
+                            .padding(.bottom, 50)
+                            
+                            
+                        }
                     }
-                    .foregroundColor(.white)
-                    .frame(width: 300, height: 50)
-                    .background(Color.blue)
-                    .cornerRadius(10)
-                    
-                    
                 }
             }
         }
-    
+            
+            
+        destination: { state in
+            switch state {
+            case .signup:
+                CaseLet(
+                    /LoginDomain.Path.State.signup,
+                     action: LoginDomain.Path.Action.signup,
+                     then: SignUpView.init(store:)
+                )
+            case .loggedIn:
+                CaseLet(
+                    /LoginDomain.Path.State.loggedIn,
+                     action: LoginDomain.Path.Action.loggedIn,
+                     then: NinePlayView.init(store:)
+                )
+            }
+            
+        }
         
+        
+        
+    }
 }
     
     /*
@@ -189,11 +302,11 @@ struct LoginView: View {
         }
       }
      */
-}
+
 struct LoginPreview: PreviewProvider {
   static var previews: some View {
     LoginView(
-      store: Store(initialState: LoginDomain.State()) {
+        store: Store(initialState: LoginDomain.State(ninePlay: NinePlayDomain.State())) {
         LoginDomain()
       }
     )

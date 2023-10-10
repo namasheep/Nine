@@ -23,22 +23,24 @@ struct NineApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     var body: some Scene {
         WindowGroup {
+            /*
             NinePlayView(store: Store(initialState: NinePlayDomain.State()){
                     NinePlayDomain()
                 }
             )
+             */
             /*
             LandingPageView(store: Store(initialState: LandingPageDomain.State()){
                     LandingPageDomain()
                 }
             )
              */
-            /*
+            
             LoginView(
-              store: Store(initialState: LoginDomain.State()) {
+                store: Store(initialState: LoginDomain.State(ninePlay: NinePlayDomain.State())) {
                 LoginDomain()
               }
-            )*/
+            )
         }
     }
 }

@@ -14,25 +14,52 @@ import SpriteKit
 
 struct NinePlayDomain: Reducer {
     
-    struct State : Equatable{
+    struct State : Equatable {
         var board: [[CardCellDomain.State]] = Array(repeating: Array(repeating: CardCellDomain.State(), count: 3), count: 3)
-        var deck = Deck()
+        var deck : Deck = Deck.init()
         var count = 52
         var dealing = false
         var moveChoice = " "
+        var loggedIn = Auth.auth().currentUser != nil
+        var correct = true
+        
         
     }
     
-    enum Action{
+    enum Action : Equatable{
         case cardCell(CardCellDomain.Action, Int, Int)
         case placeCard(Int, Int)
         case tapCell(Int, Int)
         case holdCell(Int, Int)
+        case logout
         case disableCard(Int, Int)
+        case logoutError(NSError)
+        case logoutSuccess
+        
     }
     
     func reduce(into state: inout State, action: Action) -> Effect<Action> {
         switch action {
+        case .logout:
+            return .run { send in
+                Task.init {
+                    do {
+                        let authResult = try await Auth.auth().signOut()
+                        await send(.logoutSuccess)
+                        
+                    } catch let error as NSError {
+                        await send(.logoutError(error as NSError))
+                    }
+                }
+                
+            }
+        case let .logoutError(err):
+            print(err)
+            return .none
+            
+        case .logoutSuccess:
+            state.loggedIn = false
+            return .none
         case .placeCard(let x, let y):
             //let card = state.deck.draw()
             //state.board[x][y] = card
@@ -72,6 +99,7 @@ struct NinePlayDomain: Reducer {
             if(state.board[x][y].currentCard != nil && card.rank <= state.board[x][y].currentCard?.rank ?? -1){
                 state.board[x][y].noInteract = true
                 state.board[x][y].currentCard = card
+                state.correct = false
                 return .run {  send in
                     Task.init {
                         do{
@@ -104,6 +132,7 @@ struct NinePlayDomain: Reducer {
             if(state.board[x][y].currentCard != nil && card.rank >= state.board[x][y].currentCard?.rank ?? -1){
                 state.board[x][y].noInteract = true
                 state.board[x][y].currentCard = card
+                state.correct = false
                 return .run {  send in
                     Task.init {
                         do{
@@ -123,6 +152,7 @@ struct NinePlayDomain: Reducer {
             state.board[x][y].currentCard = card
             return .none
         case .cardCell(.addCardPush, let x, let y):
+            print("PRESSED")
             state.moveChoice = "PUSH"
             if(state.board[x][y].disabled == true){
                 return .none
@@ -135,6 +165,7 @@ struct NinePlayDomain: Reducer {
             if(state.board[x][y].currentCard != nil && card.rank != state.board[x][y].currentCard?.rank ?? -1){
                 state.board[x][y].noInteract = true
                 state.board[x][y].currentCard = card
+                state.correct = false
                 return .run {  send in
                     Task.init {
                         do{
@@ -150,12 +181,13 @@ struct NinePlayDomain: Reducer {
                 }
 
             }
-            
+            print("ACTIVATE")
             state.board[x][y].currentCard = card
             return .none
         
             
         case .disableCard(let x, let y):
+            state.correct = true
             state.moveChoice = " "
             state.board[x][y].disabled = true
             return .none
@@ -174,94 +206,135 @@ struct NinePlayView: View {
     init(store: StoreOf<NinePlayDomain>) {
         self.store = store
         
-        for i in 0...2 {
-            for y in 0...2{
-                store.send(.cardCell(.addCard, i, y))
-            }
-            
-        }
+        
         
         // Set the navigation bar's tint color to a contrasting color
         UINavigationBar.appearance().tintColor = .red
     }
     var body: some View {
         WithViewStore(self.store, observe: { $0 }) { viewStore in
-            ZStack {
-                Color.green.ignoresSafeArea()
-                
-                VStack {
-                    ZStack{
+            TabView{
+                Section{
+                    ZStack {
+                        Color.green.ignoresSafeArea()
                         
-                        Text("NINE")
-                            .font(.custom("Silkscreen-Bold", size: 80))
-                            .foregroundColor(.black)
-                            .offset(x: 7, y: 10)
-                        Text("NINE")
-                            .font(.custom("Silkscreen-Bold", size: 80)).foregroundColor(.white)
-                    }
-                    Spacer()
-                    Text("\(viewStore.moveChoice)")
-                        .font(.custom("Silkscreen-Regular", size: 26)).foregroundColor(.white)
-                    ForEach(0..<3, id: \.self) { row in
-                        
-                        HStack {
-                            ForEach(0..<3, id: \.self) { col in
-                                CardCellView(
-                                    store: self.store.scope(
-                                        state: \.board[row][col],
-                                        action: { cardCellAction in
-                                            NinePlayDomain.Action.cardCell(cardCellAction, row, col)
-                                        }
-                                    )
-                                )
-                                .gesture(
-                                    DragGesture()
-                                        .onEnded { value in
-                                            if(!viewStore.board[row][col].noInteract){
-                                                let horizontalDistance = value.translation.width
-                                                let verticalDistance = value.translation.height
-                                                
-                                                if abs(horizontalDistance) > abs(verticalDistance) {
-                                                    if horizontalDistance > 0 {
-                                                        // Handle right swipe
-                                                        // Perform your action here
-                                                        viewStore.send(.cardCell(.addCardPush, row ,col))
-                                                    } else {
-                                                        // Handle left swipe
-                                                        // Perform your action here
-                                                        viewStore.send(.cardCell(.addCardPush, row ,col))
-                                                    }
-                                                } else {
-                                                    if verticalDistance > 0 {
-                                                        // Handle down swipe
-                                                        // Perform your action here
-                                                        viewStore.send(.cardCell(.addCardLow, row ,col))
-                                                    } else {
-                                                        // Handle up swipe
-                                                        // Perform your action here
-                                                        viewStore.send(.cardCell(.addCardHigh, row ,col))
+                        VStack {
+                            ZStack{
+                                
+                                Text("NINE")
+                                    .font(.custom("Silkscreen-Bold", size: 80))
+                                    .foregroundColor(.black)
+                                    .offset(x: 7, y: 10)
+                                Text("NINE")
+                                    .font(.custom("Silkscreen-Bold", size: 80)).foregroundColor(.white)
+                            }
+                            ZStack{
+                                
+                                Text("\(viewStore.deck.count)")
+                                    .font(.custom("Silkscreen-Regular", size: 34))
+                                    .foregroundColor(.black)
+                                    .offset(x: 3, y: 5)
+                                Text("\(viewStore.deck.count)")
+                                    .font(.custom("Silkscreen-Regular", size: 34)).foregroundColor(.white)
+                            }
+                            
+                            Spacer()
+                            ZStack{
+                                Text("\(viewStore.moveChoice)")
+                                    .font(.custom("Silkscreen-Regular", size: 26)).foregroundColor(.black)
+                                    .offset(x: 3, y: 2)
+                                Text("\(viewStore.moveChoice)")
+                                    .font(.custom("Silkscreen-Regular", size: 26)).foregroundColor(viewStore.correct ? .white : .red)
+                                    
+                            }
+                            ForEach(0..<3, id: \.self) { row in
+                                
+                                HStack {
+                                    ForEach(0..<3, id: \.self) { col in
+                                        CardCellView(
+                                            store: self.store.scope(
+                                                state: \.board[row][col],
+                                                action: { cardCellAction in
+                                                    NinePlayDomain.Action.cardCell(cardCellAction, row, col)
+                                                }
+                                            )
+                                        )
+                                        .gesture(
+                                            DragGesture()
+                                                .onEnded { value in
+                                                    if(!viewStore.board[row][col].noInteract){
+                                                        let horizontalDistance = value.translation.width
+                                                        let verticalDistance = value.translation.height
+                                                        
+                                                        if abs(horizontalDistance) > abs(verticalDistance) {
+                                                            if horizontalDistance > 0 {
+                                                                // Handle right swipe
+                                                                // Perform your action here
+                                                                viewStore.send(.cardCell(.addCardPush, row ,col))
+                                                            } else {
+                                                                // Handle left swipe
+                                                                // Perform your action here
+                                                                viewStore.send(.cardCell(.addCardPush, row ,col))
+                                                            }
+                                                        } else {
+                                                            if verticalDistance > 0 {
+                                                                // Handle down swipe
+                                                                // Perform your action here
+                                                                viewStore.send(.cardCell(.addCardLow, row ,col))
+                                                            } else {
+                                                                // Handle up swipe
+                                                                // Perform your action here
+                                                                viewStore.send(.cardCell(.addCardHigh, row ,col))
+                                                            }
+                                                        }
                                                     }
                                                 }
-                                            }
+                                        )
+                                        .onTapGesture {
+                                            
+                                            viewStore.send(.cardCell(.addCardPush,row, col))
+                                            
                                         }
-                                )
-                                .onTapGesture {
-                                    
-                                    viewStore.send(.cardCell(.addCardPush,row, col))
-                                    
+                                        .onLongPressGesture {
+                                            viewStore.send(.holdCell(row, col))
+                                        }
+                                        
+                                    }
                                 }
-                                .onLongPressGesture {
-                                    viewStore.send(.holdCell(row, col))
-                                }
-                                
                             }
+                            Spacer()
                         }
+                        
+                        
+                        
                     }
-                    Spacer()
+                        
+                }.tabItem(){
+                    Text("9")
+                        .font(.custom("Silkscreen-Bold", size: 100))
+                }
+            Text("SAOSIAOSA")
+                .tabItem(){
+                    Image("003-users")
+                }
+            
+                Section{
+                    Button("Logout"){
+                        viewStore.send(.logout)
+                    }
+                }
+                .tabItem(){
+                    Image("002-settings")
                 }
                 
-                
-                 
+            }
+            
+        }
+        .onAppear {
+            for i in 0...2 {
+                for y in 0...2 {
+                    store.send(.cardCell(.addCard, i, y))
+                }
             }
         }
         
@@ -336,7 +409,7 @@ struct CardCellView: View {
             Image(viewStore.disabled == true ? Card.cardBackImg : viewStore.currentCard?.imageString() ?? "xmark")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 50*1.5, height: 70*1.5)
+                .frame(width: 35*1.9, height: 47*1.9)
                 .padding(5)
                 
                 .cornerRadius(10)

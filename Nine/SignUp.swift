@@ -25,7 +25,7 @@ struct SignUpDomain: Reducer {
         var dispName = ""
       }
 
-      enum Action {
+    enum Action : Equatable{
         case passwordChanged(String)
         case loginButtonTapped
         case usernameChanged(String)

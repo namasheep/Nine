@@ -29,7 +29,7 @@ struct Card : Equatable, CustomStringConvertible {
 // Define a struct to represent a Deck of cards
 struct Deck : Equatable {
     private var cards: [Card]
-    private var count = 52
+    public var count = 52
     
     init() {
         cards = []
